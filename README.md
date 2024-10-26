@@ -1,6 +1,3 @@
-Here's a structured README file based on the provided text:
-
----
 
 # Disease Management and Data Visualization
 

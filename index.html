@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- Include the CesiumJS JavaScript and CSS files -->
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+</head>
+<body>
+    <div id="hero"></div>
+    <div id="cesiumContainer" style="width:100%; height:100vh;"></div>
+    <script type="module">
+      Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzNzJjNzdmOC0wMGVjLTRkMzYtOGU2ZC04NTE2MzNkNmE3ZDYiLCJpZCI6MjQwMTczLCJpYXQiOjE3MjU4ODYyMDZ9.zAgLbuRPWru5jzKtYXZIEFEZP8YVQQaB70Z_pgXNvAQ';
+  
+      // Initialize the Cesium Viewer in the HTML element with the cesiumContainer ID.
+      const viewer = new Cesium.Viewer('cesiumContainer', {
+        terrain: Cesium.Terrain.fromWorldTerrain(),
+      });    
+  
+      // Fly the camera to a default location (far enough to see the whole Earth)
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(0.0, 0.0, 20000000), 
+        orientation: {
+          heading: Cesium.Math.toRadians(0.0),  
+          pitch: Cesium.Math.toRadians(-90.0),  
+          roll: 0.0
+        }
+      });
+  
+      // Add Cesium OSM Buildings, a global 3D buildings layer.
+      const buildingTileset = await Cesium.createOsmBuildingsAsync();
+      viewer.scene.primitives.add(buildingTileset);
+  
+      // *** WebGLGlobeDataSource Code Begins Here ***
+   // Define the WebGLGlobeDataSource class
+  function WebGLGlobeDataSource(name) {
+    this._name = name;
+    this._changed = new Cesium.Event();
+    this._error = new Cesium.Event();
+    this._isLoading = false;
+    this._loading = new Cesium.Event();
+    this._entityCollection = new Cesium.EntityCollection();
+    this._seriesNames = [];
+    this._seriesToDisplay = undefined;
+    this._heightScale = 1000;  // Adjusted height scale
+    this._entityCluster = new Cesium.EntityCluster();
+  }
+  
+  
+      Object.defineProperties(WebGLGlobeDataSource.prototype, {
+        name: { get: function() { return this._name; } },
+        clock: { value: undefined, writable: false },
+        entities: { get: function() { return this._entityCollection; } },
+        isLoading: { get: function() { return this._isLoading; } },
+        changedEvent: { get: function() { return this._changed; } },
+        errorEvent: { get: function() { return this._error; } },
+        loadingEvent: { get: function() { return this._loading; } },
+        seriesNames: { get: function() { return this._seriesNames; } },
+        seriesToDisplay: {
+          get: function() { return this._seriesToDisplay; },
+          set: function(value) {
+            this._seriesToDisplay = value;
+            const collection = this._entityCollection;
+            const entities = collection.values;
+            collection.suspendEvents();
+            for (let i = 0; i < entities.length; i++) {
+              const entity = entities[i];
+              entity.show = value === entity.seriesName;
+            }
+            collection.resumeEvents();
+          },
+        },
+        heightScale: {
+          get: function() { return this._heightScale; },
+          set: function(value) {
+            if (value <= 0) throw new Cesium.DeveloperError('value must be greater than 0');
+            this._heightScale = value;
+          },
+        },
+        clustering: {
+          get: function() { return this._entityCluster; },
+          set: function(value) {
+            if (!Cesium.defined(value)) throw new Cesium.DeveloperError('value must be defined.');
+            this._entityCluster = value;
+          },
+        },
+      });
+  
+      WebGLGlobeDataSource.prototype.load = function (data) {
+        if (!Cesium.defined(data)) throw new Cesium.DeveloperError("data is required.");
+        this._setLoading(true);
+        this._seriesNames.length = 0;
+        this._seriesToDisplay = undefined;
+        const heightScale = this.heightScale;
+        const entities = this._entityCollection;
+        entities.suspendEvents();
+        entities.removeAll();
+  
+        for (let x = 0; x < data.length; x++) {
+          const series = data[x];
+          const seriesName = series[0];
+          const coordinates = series[1];
+          this._seriesNames.push(seriesName);
+          const show = true; // Show all series by default
+          if (show) this._seriesToDisplay = seriesName;
+  
+          for (let i = 0; i < coordinates.length; i += 3) {
+            const latitude = coordinates[i];
+            const longitude = coordinates[i + 1];
+            const height = coordinates[i + 2];
+            if (height === 0) continue;
+  
+            const color = Cesium.Color.fromHsl(0.6 - height * 0.5, 1.0, 0.5);
+            const surfacePosition = Cesium.Cartesian3.fromDegrees(longitude, latitude, 0);
+            const heightPosition = Cesium.Cartesian3.fromDegrees(longitude, latitude, height * heightScale);
+            const polyline = new Cesium.PolylineGraphics();
+            polyline.material = new Cesium.ColorMaterialProperty(color);
+            polyline.width = new Cesium.ConstantProperty(2);
+            polyline.arcType = new Cesium.ConstantProperty(Cesium.ArcType.NONE);
+            polyline.positions = new Cesium.ConstantProperty([surfacePosition, heightPosition]);
+  
+            const entity = new Cesium.Entity({
+              id: seriesName + ' index ' + i.toString(),
+              show: show,
+              polyline: polyline,
+              seriesName: seriesName,
+            });
+  
+            entities.add(entity);
+          }
+        }
+  
+        entities.resumeEvents();
+        this._changed.raiseEvent(this);
+        this._setLoading(false);
+      };
+  
+      WebGLGlobeDataSource.prototype._setLoading = function(isLoading) {
+        if (this._isLoading !== isLoading) {
+          this._isLoading = isLoading;
+          this._loading.raiseEvent(this, isLoading);
+        }
+      };
+  
+      // Initialize the WebGLGlobeDataSource
+      const dataSource = new WebGLGlobeDataSource();
+  
+      // Load the disease data (now including more diseases)
+      const diseaseData = [
+        ["DiseaseA", [28.6139, 77.209, 3000, 37.7749, -122.4194, 1500]],  // New Delhi & San Francisco
+        ["DiseaseB", [51.5074, -0.1278, 5000, 40.7128, -74.006, 2000]],   // London & New York
+        ["DiseaseC", [35.6895, 139.6917, 4000, -33.8688, 151.2093, 2500]], // Tokyo & Sydney
+        ["DiseaseD", [48.8566, 2.3522, 3500, 39.9042, 116.4074, 3000]],   // Paris & Beijing
+        ["DiseaseE", [-22.9068, -43.1729, 4500, 30.0444, 31.2357, 2200]]  // Rio de Janeiro & Cairo
+      ];
+  
+      // Load the data into the WebGLGlobeDataSource
+      dataSource.load(diseaseData);
+  
+      // Add the data source to the Cesium viewer
+      viewer.dataSources.add(dataSource);
+  
+    </script>
+  <script>
+    // Function to load an HTML file
+    function loadHTML(file, elementId) {
+        fetch(file)
+            .then(response => response.text())
+            .then(data => {
+                document.getElementById(elementId).innerHTML = data;
+            });
+    }
+
+    // Load hero and footer sections
+    loadHTML('hero.html', 'hero');
+
+</script>
+
+</body>
+</html>
